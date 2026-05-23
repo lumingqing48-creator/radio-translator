@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>电台实时翻译</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;700&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --panel: #12121a;
+    --border: #1e1e2e;
+    --accent: #00ff88;
+    --accent2: #ff6b35;
+    --text: #e0e0e0;
+    --muted: #555570;
+    --en-color: #a0c4ff;
+    --zh-color: #00ff88;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans SC', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,255,136,0.015) 2px, rgba(0,255,136,0.015) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  header {
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  .logo span { color: var(--muted); }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    margin-left: auto;
+    transition: all 0.3s;
+  }
+  .status-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1.5s infinite; }
+  .status-dot.loading { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); animation: pulse 0.5s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .mic-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .mic-btn {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--panel);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    outline: none;
+  }
+  .mic-btn:hover { border-color: var(--accent); box-shadow: 0 0 20px rgba(0,255,136,0.15); }
+  .mic-btn.recording { border-color: var(--accent2); box-shadow: 0 0 30px rgba(255,107,53,0.3); animation: recordPulse 2s infinite; }
+  .mic-btn.denied { border-color: #ff4444; opacity: 0.7; cursor: not-allowed; }
+
+  @keyframes recordPulse {
+    0%, 100% { box-shadow: 0 0 30px rgba(255,107,53,0.3); }
+    50% { box-shadow: 0 0 50px rgba(255,107,53,0.5); }
+  }
+
+  .mic-icon { font-size: 28px; user-select: none; }
+
+  .waveform {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 24px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .waveform.active { opacity: 1; }
+  .wave-bar {
+    width: 3px;
+    background: var(--accent2);
+    border-radius: 2px;
+    animation: wave 0.8s ease-in-out infinite;
+    height: 4px;
+  }
+  .wave-bar:nth-child(2) { animation-delay: 0.1s; }
+  .wave-bar:nth-child(3) { animation-delay: 0.2s; }
+  .wave-bar:nth-child(4) { animation-delay: 0.3s; }
+  .wave-bar:nth-child(5) { animation-delay: 0.15s; }
+  .wave-bar:nth-child(6) { animation-delay: 0.05s; }
+  .wave-bar:nth-child(7) { animation-delay: 0.25s; }
+
+  @keyframes wave {
+    0%, 100% { height: 4px; }
+    50% { height: 20px; }
+  }
+
+  .mic-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-align: center;
+  }
+
+  /* Permission guide modal */
+  .perm-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .perm-overlay.show { display: flex; }
+
+  .perm-box {
+    background: var(--panel);
+    border: 1px solid rgba(255,107,53,0.4);
+    border-radius: 12px;
+    padding: 28px 24px;
+    max-width: 420px;
+    width: 100%;
+    animation: slideIn 0.25s ease;
+  }
+
+  .perm-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    color: var(--accent2);
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .perm-steps {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .perm-steps li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+
+  .step-num {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--accent);
+    background: rgba(0,255,136,0.1);
+    border: 1px solid rgba(0,255,136,0.3);
+    border-radius: 4px;
+    padding: 2px 6px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .perm-note {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+    margin-bottom: 16px;
+    line-height: 1.8;
+  }
+
+  .perm-close {
+    width: 100%;
+    padding: 10px;
+    background: rgba(0,255,136,0.08);
+    border: 1px solid rgba(0,255,136,0.3);
+    border-radius: 6px;
+    color: var(--accent);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .perm-close:hover { background: rgba(0,255,136,0.15); }
+
+  .feed {
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .feed::-webkit-scrollbar { width: 2px; }
+  .feed::-webkit-scrollbar-track { background: transparent; }
+  .feed::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .entry {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    animation: slideIn 0.3s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .entry::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent);
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .entry-en { font-family: 'Space Mono', monospace; font-size: 16px; color: var(--en-color); line-height: 1.7; margin-bottom: 12px; }
+  .entry-zh { font-size: 19px; color: var(--zh-color); line-height: 1.8; font-weight: 400; }
+  .entry-time { font-family: 'Space Mono', monospace; font-size: 9px; color: var(--muted); margin-top: 8px; letter-spacing: 1px; }
+
+  .translating-indicator {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--accent2);
+    letter-spacing: 2px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .translating-dots span { animation: blink 1s infinite; font-size: 14px; }
+  .translating-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .translating-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes blink {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 1; }
+  }
+
+  .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .empty-state .big-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+  .empty-state p { font-family: 'Space Mono', monospace; font-size: 11px; letter-spacing: 2px; line-height: 2; }
+
+  .controls { display: flex; gap: 10px; margin-top: 16px; width: 100%; max-width: 720px; }
+
+  .clear-btn {
+    flex: 1;
+    padding: 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .clear-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+
+  .error-msg {
+    background: rgba(255,107,53,0.1);
+    border: 1px solid rgba(255,107,53,0.3);
+    color: var(--accent2);
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    width: 100%;
+    max-width: 720px;
+    margin-top: 8px;
+    display: none;
+  }
+
+  .lang-select {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    padding: 8px 10px;
+    cursor: pointer;
+    outline: none;
+    letter-spacing: 1px;
+  }
+  .lang-select:focus { border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">RADIO<span> // </span>译</div>
+  </div>
+  <select class="lang-select" id="targetLang">
+    <option value="中文">→ 中文</option>
+    <option value="English">→ English</option>
+    <option value="日本語">→ 日本語</option>
+    <option value="한국어">→ 한국어</option>
+    <option value="Español">→ Español</option>
+  </select>
+  <div class="status-dot" id="statusDot"></div>
+</header>
+
+<div class="mic-section">
+  <button class="mic-btn" id="micBtn" onclick="toggleRecording()">
+    <span class="mic-icon" id="micIcon">🎙️</span>
+  </button>
+  <div class="waveform" id="waveform">
+    <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+    <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+  </div>
+  <div class="mic-label" id="micLabel">点击开始收听</div>
+</div>
+
+<div class="feed" id="feed">
+  <div class="empty-state" id="emptyState">
+    <div class="big-icon">📻</div>
+    <p>将手机麦克风靠近收音机<br>点击按钮开始实时翻译</p>
+  </div>
+</div>
+
+<div class="translating-indicator" id="translatingIndicator">
+  TRANSLATING <div class="translating-dots"><span>.</span><span>.</span><span>.</span></div>
+</div>
+
+<div class="error-msg" id="errorMsg"></div>
+
+<div class="controls">
+  <button class="clear-btn" onclick="clearFeed()">清空 / CLEAR</button>
+  <button class="clear-btn" onclick="showHistory()" style="border-color:#00ff88;color:#00ff88;">历史记录</button>
+</div>
+
+<!-- History Modal -->
+<div class="perm-overlay" id="historyOverlay">
+  <div class="perm-box" style="max-height:80vh;overflow-y:auto;border-color:rgba(0,255,136,0.3)">
+    <div class="perm-title" style="color:var(--accent);justify-content:space-between">
+      <span>📋 历史记录</span>
+      <button onclick="clearHistory()" style="background:transparent;border:1px solid rgba(255,107,53,0.4);color:var(--accent2);font-family:Space Mono,monospace;font-size:9px;padding:4px 8px;border-radius:4px;cursor:pointer;letter-spacing:1px">清空历史</button>
+    </div>
+    <div id="historyList" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px"></div>
+    <button class="perm-close" onclick="document.getElementById('historyOverlay').classList.remove('show')">关闭</button>
+  </div>
+</div>
+
+<!-- Permission Guide Modal -->
+<div class="perm-overlay" id="permOverlay">
+  <div class="perm-box">
+    <div class="perm-title">🔒 需要麦克风权限</div>
+    <ul class="perm-steps" id="permSteps"></ul>
+    <div class="perm-note" id="permNote"></div>
+    <button class="perm-close" onclick="closePermGuide()">我已设置，重新尝试</button>
+  </div>
+</div>
+
+<script>
+let recognition = null;
+let isRecording = false;
+let translateQueue = [];
+let isTranslating = false;
+
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 5000);
+}
+
+function setStatus(state) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot' + (state ? ' ' + state : '');
+}
+
+// Detect platform for tailored instructions
+function getPlatform() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua)) return 'ios';
+  if (/Android/.test(ua)) return 'android';
+  return 'desktop';
+}
+
+function showPermGuide() {
+  const platform = getPlatform();
+  const stepsEl = document.getElementById('permSteps');
+  const noteEl = document.getElementById('permNote');
+
+  const guides = {
+    ios: {
+      steps: [
+        '点击顶部地址栏左侧的 <strong>🔒 图标</strong>',
+        '选择「网站设置」或「权限」',
+        '将「麦克风」切换为<strong>允许</strong>',
+        '返回此页面，重新点击麦克风按钮',
+      ],
+      note: '也可以前往：设置 → Safari → 麦克风 → 允许'
+    },
+    android: {
+      steps: [
+        '点击浏览器地址栏左侧的 <strong>🔒 图标</strong>',
+        '点击「权限」或「网站设置」',
+        '找到「麦克风」，改为<strong>允许</strong>',
+        '刷新页面后重试',
+      ],
+      note: '也可以前往：手机设置 → 应用 → 浏览器 → 权限 → 麦克风'
+    },
+    desktop: {
+      steps: [
+        '点击浏览器地址栏右侧的 <strong>🔒 / ⚠️ 图标</strong>',
+        '找到「麦克风」权限，选择<strong>允许</strong>',
+        '页面会自动刷新，重新点击麦克风按钮',
+      ],
+      note: 'Chrome: 地址栏左侧图标 → 网站设置 → 麦克风 → 允许\nSafari: 顶部菜单 → Safari → 网站设置 → 麦克风'
+    }
+  };
+
+  const guide = guides[platform];
+  stepsEl.innerHTML = guide.steps.map((s, i) =>
+    `<li><span class="step-num">0${i+1}</span><span>${s}</span></li>`
+  ).join('');
+  noteEl.textContent = guide.note;
+
+  document.getElementById('permOverlay').classList.add('show');
+  document.getElementById('micBtn').classList.add('denied');
+  document.getElementById('micIcon').textContent = '🚫';
+  document.getElementById('micLabel').textContent = '权限被拒绝';
+}
+
+function closePermGuide() {
+  document.getElementById('permOverlay').classList.remove('show');
+  document.getElementById('micBtn').classList.remove('denied');
+  document.getElementById('micIcon').textContent = '🎙️';
+  document.getElementById('micLabel').textContent = '点击重新尝试';
+}
+
+async function toggleRecording() {
+  if (isRecording) { stopRecording(); return; }
+
+  // First, explicitly request mic permission via getUserMedia
+  // This gives a proper browser-native permission prompt
+  try {
+    document.getElementById('micLabel').textContent = '请求权限中...';
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Permission granted — stop the test stream immediately
+    stream.getTracks().forEach(t => t.stop());
+    startRecording();
+  } catch (err) {
+    document.getElementById('micLabel').textContent = '点击开始收听';
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      showPermGuide();
+    } else if (err.name === 'NotFoundError') {
+      showError('未检测到麦克风设备，请检查硬件连接');
+    } else {
+      showError('麦克风访问失败：' + err.message);
+    }
+  }
+}
+
+function startRecording() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showError('您的浏览器不支持语音识别，请使用 Chrome 或 Safari');
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onstart = () => {
+    isRecording = true;
+    document.getElementById('micBtn').classList.add('recording');
+    document.getElementById('micIcon').textContent = '⏹️';
+    document.getElementById('micLabel').textContent = '正在收听...';
+    document.getElementById('waveform').classList.add('active');
+    setStatus('active');
+    const empty = document.getElementById('emptyState');
+    if (empty) empty.style.display = 'none';
+  };
+
+  let interimText = '';
+  let translateTimer = null;
+
+  recognition.onresult = (event) => {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      if (event.results[i].isFinal) {
+        const full = event.results[i][0].transcript.trim();
+        // Split on natural sentence boundaries
+        const sentences = full.split(/(?<=[.!?,])\s+/);
+        for (const s of sentences) {
+          const text = s.trim();
+          if (text.length > 3) { translateQueue.push(text); }
+        }
+        if (translateQueue.length > 0) processQueue();
+      }
+    }
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error === 'not-allowed') showPermGuide();
+    else if (e.error !== 'no-speech') showError('识别出错: ' + e.error);
+  };
+
+  recognition.onend = () => {
+    if (isRecording) recognition.start();
+  };
+
+  recognition.start();
+}
+
+function stopRecording() {
+  isRecording = false;
+  if (recognition) { recognition.stop(); recognition = null; }
+  document.getElementById('micBtn').classList.remove('recording');
+  document.getElementById('micIcon').textContent = '🎙️';
+  document.getElementById('micLabel').textContent = '点击开始收听';
+  document.getElementById('waveform').classList.remove('active');
+  setStatus('');
+}
+
+async function processQueue() {
+  if (isTranslating || translateQueue.length === 0) return;
+  const text = translateQueue[translateQueue.length - 1];
+  translateQueue = [];
+  isTranslating = true;
+  await translateText(text);
+  isTranslating = false;
+  if (translateQueue.length > 0) processQueue();
+}
+
+const langCodeMap = {
+  '中文': 'zh-CN',
+  'English': 'en',
+  '日本語': 'ja',
+  '한국어': 'ko',
+  'Español': 'es'
+};
+
+async function translateText(text) {
+  const targetLang = document.getElementById('targetLang').value;
+  const targetCode = langCodeMap[targetLang] || 'zh-CN';
+  const indicator = document.getElementById('translatingIndicator');
+  indicator.style.display = 'flex';
+  setStatus('loading');
+
+  try {
+    // Try Google first
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${targetCode}&dt=t&q=${encodeURIComponent(text)}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    const translation = data[0]?.map(s => s[0]).join('');
+    if (translation && translation !== text) { addEntry(text, translation); return; }
+  } catch (e1) {}
+  try {
+    // Fallback to MyMemory
+    const url2 = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetCode}`;
+    const r2 = await fetch(url2);
+    const d2 = await r2.json();
+    const t2 = d2.responseData?.translatedText;
+    if (t2 && t2 !== text && !t2.includes('MYMEMORY WARNING')) addEntry(text, t2);
+  } catch (e2) {
+    showError('翻译失败，请检查网络连接');
+  } finally {
+    indicator.style.display = 'none';
+    setStatus(isRecording ? 'active' : '');
+  }
+}
+
+function addEntry(original, translated) {
+  const feed = document.getElementById('feed');
+  // Keep only last 1 entry
+  const entries = feed.querySelectorAll('.entry');
+  entries.forEach(e => e.remove());
+  saveToHistory(original, translated);
+  const entry = document.createElement('div');
+  entry.className = 'entry';
+  entry.innerHTML = `
+    <div class="entry-en">${escapeHtml(original)}</div>
+    <div class="entry-zh">${escapeHtml(translated)}</div>
+  `;
+  feed.appendChild(entry);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+// History functions
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem('radioHistory');
+    if (!raw) return [];
+    const all = JSON.parse(raw);
+    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    return all.filter(e => e.ts > threeDaysAgo);
+  } catch { return []; }
+}
+
+function saveToHistory(original, translated) {
+  const history = loadHistory();
+  history.push({ original, translated, ts: Date.now() });
+  // Keep max 500 entries
+  if (history.length > 500) history.splice(0, history.length - 500);
+  localStorage.setItem('radioHistory', JSON.stringify(history));
+}
+
+function showHistory() {
+  const history = loadHistory();
+  const list = document.getElementById('historyList');
+  if (history.length === 0) {
+    list.innerHTML = '<p style="color:var(--muted);font-family:Space Mono,monospace;font-size:11px;text-align:center;padding:20px">暂无记录</p>';
+  } else {
+    // Group by date
+    const groups = {};
+    history.forEach(e => {
+      const d = new Date(e.ts);
+      const key = d.toLocaleDateString('zh-CN', {month:'long', day:'numeric', weekday:'short'});
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(e);
+    });
+    list.innerHTML = Object.keys(groups).reverse().map(date => `
+      <div style="margin-bottom:8px">
+        <div style="font-family:Space Mono,monospace;font-size:9px;color:var(--muted);letter-spacing:2px;margin-bottom:6px">${date}</div>
+        ${groups[date].reverse().map(e => `
+          <div style="background:#0a0a0f;border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:6px">
+            <div style="font-family:Space Mono,monospace;font-size:11px;color:var(--en-color);line-height:1.6;margin-bottom:4px">${escapeHtml(e.original)}</div>
+            <div style="font-size:13px;color:var(--zh-color);line-height:1.6">${escapeHtml(e.translated)}</div>
+            <div style="font-family:Space Mono,monospace;font-size:9px;color:var(--muted);margin-top:4px">${new Date(e.ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}</div>
+          </div>
+        `).join('')}
+      </div>
+    `).join('');
+  }
+  document.getElementById('historyOverlay').classList.add('show');
+}
+
+function clearHistory() {
+  if (confirm('确定清空所有历史记录？')) {
+    localStorage.removeItem('radioHistory');
+    showHistory();
+  }
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function clearFeed() {
+  document.getElementById('feed').innerHTML = `<div class="empty-state" id="emptyState">
+    <div class="big-icon">📻</div>
+    <p>将手机麦克风靠近收音机<br>点击按钮开始实时翻译</p>
+  </div>`;
+}
+</script>
+</body>
+</html>
